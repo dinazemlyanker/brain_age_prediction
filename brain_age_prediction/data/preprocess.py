@@ -11,6 +11,7 @@ import pandas as pd
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 import sys
+import subprocess
 
 
 def getM(ref, mov):
@@ -212,26 +213,68 @@ def easy_reg(synseg_file, synthsr_file, output_file, to_skull_strip=None):
 def preprocess(synseg_file, synthsr_file, output_file, to_skull_strip=None):
     easy_reg(synseg_file, synthsr_file, output_file)
 
-def preprocess_data(input_file, output_dir):
+def run_synthsr(file_df):
+    print('Running SynthSR..........................................................')
+    synthsr_dir = 'synthsr_output'
+    synthsr_output_paths = []
+    if not os.path.exists(synthsr_dir):
+        os.mkdir(synthsr_dir)
+    for _,row in file_df.iterrows():
+        filename = row['file_name']
+        filepath = row['filepath']
+        synthsr_output_fn = os.path.join(synthsr_dir, filename.replace('.nii.gz', '_synthsr.nii.gz'))
+        synthsr_output_paths.append(synthsr_output_fn)
+        if not os.path.exists(synthsr_output_fn):
+            subprocess.run(['mri_synthsr', '--i', filepath, '--o', synthsr_output_fn, "--threads", '4'])
+    return synthsr_output_paths
+
+def run_synthseg(file_df):
+    print('Running SynthSeg.........................................................')
+    synthseg_dir = 'synthseg_output'
+    synthseg_output_paths = []
+    if not os.path.exists(synthseg_dir):
+        os.mkdir(synthseg_dir)
+    for _,row in file_df.iterrows():
+        filename = row['file_name']
+        filepath = row['synthsr_path']
+        synthseg_output_fn = os.path.join(synthseg_dir, filename +  '_synthseg.nii.gz')
+        synthseg_output_paths.append(synthseg_output_fn)
+        if not os.path.exists(synthseg_output_fn):
+            subprocess.run(['mri_synthseg', '--i', filepath, '--o', synthseg_output_fn, '--threads', '4'])
+            print(['mri_synthseg', '--i', filepath, '--o', synthseg_output_fn, '--threads', '4'])
+    return synthseg_output_paths
+
+
+def preprocess_data(input_file_csv_path, output_dir):
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
-    df = pd.read_csv(input_file)
+    df = pd.read_csv(input_file_csv_path)
     output_file_names = []
-    df['file_name'] = df['filepath'].apply(lambda fp: fp.split('/')[-1].replace('.nii.gz', ''))
+    # TODO: fix this so that it makes sense
+    df['file_name'] = df['synthsr_path'].apply(lambda fp: '_'.join(fp.split('/')[-3:]))
+    df['file_name'] = df['file_name'].apply(lambda fp: fp.replace('.nii.gz', ''))
+    print(df)
+    if 'synthsr_path' not in df.columns:
+        synthsr_output_paths = run_synthsr(df)
+        df['synthsr_path'] = synthsr_output_paths
+    if 'synthseg_path' not in df.columns:
+        synthseg_output_paths = run_synthseg(df)
+        df['synthseg_path'] = synthseg_output_paths
+    
+    output_file_names = []
     for _, row in df.iterrows():
-        filepath = row['filepath']
+        filepath = row['synthsr_path']
         synthseg = row['synthseg_path']
         output_file = os.path.join(output_dir, row['file_name'] + '.nii.gz')
         output_file_names.append(output_file)
         if os.path.exists(synthseg) and os.path.exists(filepath) and not os.path.exists(output_file):
-            print('UNICO(RN)')
             print('Preprocessing: ', output_file)
             try:
                 easy_reg(synthseg, filepath, output_file)
-            except e:
-                print('ERRORED on: ', filepath, ' error: ', e)
+            except:
+                print('ERRORED on: ', filepath)
     df['preprocessed_path'] = output_file_names
-    df.to_csv(input_file)
+    df.to_csv(input_file_csv_path)
 
 
     

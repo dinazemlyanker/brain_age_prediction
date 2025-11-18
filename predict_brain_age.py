@@ -42,6 +42,7 @@ def predict_brain_age(input_file, output_file, include_certainty, batch_size=6, 
     else:
         # model = model.to('cuda')
         predictions = trainer.predict(model, dataloaders=test_loader)
+        print(predictions)
         values = [t.item() for t in predictions[0]]
         print(values)
         test_data['brain_age_pred'] = values
